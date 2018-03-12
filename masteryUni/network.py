@@ -1,3 +1,5 @@
+# tutorial: https://machinelearningmastery.com/time-series-forecasting-long-short-term-memory-network-python/
+
 import numpy as np
 import pandas as pd
 import keras
