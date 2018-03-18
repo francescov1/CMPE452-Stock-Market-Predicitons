@@ -39,49 +39,153 @@ def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
         agg.dropna(inplace=True)
     return agg
 
+# create a differenced series
+def difference(dataset, interval=1):
+    diff = list()
+    for i in range(interval, len(dataset)):
+        value = dataset[i] - dataset[i-interval]
+        diff.append(value)
+    return pd.Series(diff)
+
+
 # transform series into train and test sets for supervised learning
 def prepare_data(series, n_test, n_lag, n_seq):
     # extract raw vals
     raw_values = series.values
-    raw_values = raw_values.reshape(len(raw_values), 1)
+
+    # transform data to be stationary
+    diff_series = difference(raw_values, 1)
+    diff_values = diff_series.values
+    diff_values = diff_values.reshape(len(diff_values), 1)
+
+    # rescale vals to -1, 1
+    scaler = MinMaxScaler(feature_range=(-1, 1))
+    scaled_values = scaler.fit_transform(diff_values)
+    scaled_values = scaled_values.reshape(len(scaled_values), 1)
 
     # transform into supervised learning problem X, y
-    supervised = series_to_supervised(raw_values, n_lag, n_seq)
+    supervised = series_to_supervised(scaled_values, n_lag, n_seq)
     supervised_values = supervised.values
 
     # split into train and test sets
-    train, test = supervised_values[0: -n_test], supervised_values[-n_test:]
-    return train, test
+    train, test = supervised_values[0:-n_test], supervised_values[-n_test:]
+    return scaler, train, test
+
+
+# fit an LSTM network to training data
+def fit_lstm(train, n_lag, n_seq, n_batch, n_epoch, n_neurons):
+    # reshape training into [samples, timesteps, features]
+    X, y = train[:, 0:n_lag], train[:, n_lag:]
+    X = X.reshape(X.shape[0], 1, X.shape[1])
+
+    # design network
+    model = keras.models.Sequential()
+    model.add(keras.layers.LSTM(n_neurons, batch_input_shape=(n_batch, X.shape[1], X.shape[2]), stateful=True))
+    model.add(keras.layers.Dense(y.shape[1]))
+    model.compile(loss='mean_squared_error', optimizer='adam')
+
+    # fit network
+    for i in range(n_epoch):
+        model.fit(X, y, epochs=1, batch_size=n_batch, verbose=0, shuffle=False)
+        model.reset_states()
+    return model
+
+def update_lstm(model, train, n_lag, n_batch, n_epoch):
+    # reshape training into [samples, timesteps, features]
+    X, y = train[:, 0:n_lag], train[:, n_lag:]
+    X = X.reshape(X.shape[0], 1, X.shape[1])
+
+    # fit network
+    for i in range(n_epoch):
+        model.fit(X, y, epochs=1, batch_size=n_batch, verbose=0, shuffle=False)
+        model.reset_states()
+    return model
+
+def forecast_lstm(model, X, n_batch):
+    # reshape input pattern to [samples, timesteps, features]
+    X = X.reshape(1, 1, len(X))
+
+    # make forecast
+    forecast = model.predict(X, batch_size=n_batch)
+
+    # convert to array
+    return [x for x in forecast[0, :]]
 
 # make a persistence forecast
 def persistence(last_ob, n_seq):
     return [last_ob for i in range(n_seq)]
 
 # evaluate the persistence model
-def make_forecasts(train, test, n_lag, n_seq):
+def make_forecasts(model, n_batch, train, test, n_lag, n_seq):
     forecasts = list()
     for i in range(len(test)):
+
         X, y = test[i, 0:n_lag], test[i, n_lag:]
 
         # make forecast
-        forecast = persistence(X[-1], n_seq)
+        # presistant forecast (simple, take last value and persist, use to get baseline rmse)
+        #forecast = persistence(X[-1], n_seq)
+
+        # LSTM forecast
+        forecast = forecast_lstm(model, X, n_batch)
 
         # store forecast
         forecasts.append(forecast)
+
+        # add new data to retrain
+        row = train.shape[0]
+        col = train.shape[1]
+        train = np.append(train, test[i])
+        train = train.reshape(row + 1, col)
+
+        model = update_lstm(model, train, n_lag, n_batch, n_epoch=5)
+
     return forecasts
+
+
+# invert differenced forecast
+def inverse_difference(last_ob, forecast):
+    # invert first forecast
+    inverted = list()
+    inverted.append(forecast[0] + last_ob)
+
+    # propagate difference forecast using inverted first val
+    for i in range(1, len(forecast)):
+        inverted.append(forecast[i] + inverted[i-1])
+    return inverted
+
+# inverse data transform on forecasts
+def inverse_transform(series, forecasts, scaler, n_test):
+    inverted = list()
+    for i in range(len(forecasts)):
+        # create array from forecast
+        forecast = np.array(forecasts[i])
+        forecast = forecast.reshape(1, len(forecast))
+
+        # invert scaling
+        inv_scale = scaler.inverse_transform(forecast)
+        inv_scale = inv_scale[0, :]
+
+        # invert differencing
+        index = len(series) - n_test + i - 1
+        last_ob = series.values[index]
+        inv_diff = inverse_difference(last_ob, inv_scale)
+
+        # store
+        inverted.append(inv_diff)
+    return inverted
+
 
 # evaluate the RMSE for each forecast time step
 def evaluate_forecasts(test, forecasts, n_lag, n_seq):
-
     for i in range(n_seq):
-        actual = test[:,(n_lag+i)]
+        actual = [row[i] for row in test]
         predicted = [forecast[i] for forecast in forecasts]
         rmse = (mean_squared_error(actual, predicted))**0.5
         print('t+%d RMSE: %f' % ((i+1), rmse))
 
-
-# plot forecasts in context of original dataset
-# also connect persisted forecast to actual persisted value in original dataset
+    # plot forecasts in context of original dataset
+    # also connect persisted forecast to actual persisted value in original dataset
 def plot_forecasts(series, forecasts, n_test):
     # plot entire dataset in blue
     plt.plot(series.values)
@@ -93,9 +197,7 @@ def plot_forecasts(series, forecasts, n_test):
         xaxis = [x for x in range(off_s, off_e)]
         yaxis = [series.values[off_s]] + forecasts[i]
         plt.plot(xaxis, yaxis, color='red')
-
     plt.show()
-
 
 
 # load dataset
@@ -105,12 +207,28 @@ series = pd.read_csv('shampoo-sales.csv', header=0, parse_dates=[0], index_col=0
 n_lag = 1
 n_seq = 3
 n_test = 10
+n_epochs = 500
+n_batch = 1
+n_neurons = 1
+
+# test parameters
+n_neurons = [1, 2, 3]
+n_epochs = [500, 1000, 2000, 3000, 5000]
 
 # prepare data
-train, test = prepare_data(series, n_test, n_lag, n_seq)
-forecasts = make_forecasts(train, test, n_lag, n_seq)
+scaler, train, test = prepare_data(series, n_test, n_lag, n_seq)
+
+# fit network
+model = fit_lstm(train, n_lag, n_seq, n_batch, n_epochs, n_neurons)
+
+# make forecast
+forecasts = make_forecasts(model, n_batch, train, test, n_lag, n_seq)
+
+# inverse transform forecasts and test
+forecasts = inverse_transform(series, forecasts, scaler, n_test+2)
+actual = [row[n_lag:] for row in test]
+actual = inverse_transform(series, actual, scaler, n_test+2)
+
+# evaluate and plot forecasts
 evaluate_forecasts(test, forecasts, n_lag, n_seq)
 plot_forecasts(series, forecasts, n_test+2)
-
-
-
