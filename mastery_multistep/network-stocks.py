@@ -74,7 +74,6 @@ def fit_lstm(train, n_lag, n_seq, n_batch, n_epoch, n_neurons):
     # reshape training into [samples, timesteps, features]
     X, y = train[:, 0:n_lag], train[:, n_lag:]
     X = X.reshape(X.shape[0], 1, X.shape[1])
-
     # design network
     model = keras.models.Sequential()
     model.add(keras.layers.LSTM(n_neurons, batch_input_shape=(n_batch, X.shape[1], X.shape[2]), stateful=True))
@@ -130,12 +129,14 @@ def make_forecasts(model, n_batch, train, test, n_lag, n_seq):
         forecasts.append(forecast)
 
         # add new data to retrain
+        '''
         row = train.shape[0]
         col = train.shape[1]
         train = np.append(train, test[i])
         train = train.reshape(row + 1, col)
 
         model = update_lstm(model, train, n_lag, n_batch, n_epoch=5)
+        '''
 
     return forecasts
 
@@ -198,26 +199,19 @@ def plot_forecasts(series, forecasts, n_test):
 
 
 # load dataset
-series = pd.read_csv('mastery_multistep/data_stock.csv')
+series = pd.read_csv('data_stocks.csv')
 series = series.drop(['DATE'], 1)
 
 # configure
 n_lag = 1
 n_seq = 3
 n_test = 10
-n_epochs = 500
+n_epochs = 1500
 n_batch = 1
 n_neurons = 1
 
-# test parameters
-'''
-n_neurons = [1, 2, 3]
-n_epochs = [500, 1000, 2000, 3000, 5000]
-'''
-
-series = series[0:50]
-print(series.head())
-
+series = series[0:200]
+series = series['SP500']
 # prepare data
 scaler, train, test = prepare_data(series, n_test, n_lag, n_seq)
 
