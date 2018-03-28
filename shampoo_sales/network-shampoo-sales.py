@@ -225,6 +225,39 @@ def plot_forecasts(series, forecasts, n_test):
     plt.show()
 
 
+# save trained network
+def save_network(model, n_neurons, n_epochs):
+    # serialize model to JSON
+    model_json = model.to_json()
+
+    filename = "model_%dneu_%depoch" % (n_neurons, n_epochs)
+
+    with open(filename + ".json", "w") as json_file:
+        json_file.write(model_json)
+    # serialize weights to HDF5
+    model.save_weights(filename + ".h5")
+    print("Saved model to disk")
+
+
+# load previously trained network
+def load_network(n_neurons, n_epochs):
+
+    filename = "model_%dneu_%depoch" % (n_neurons, n_epochs)
+
+    # load json and create model
+    json_file = open(filename + ".json", "r")
+    loaded_model_json = json_file.read()
+    json_file.close()
+
+    loaded_model = keras.models.model_from_json(loaded_model_json)
+    # load weights into new model
+    loaded_model.load_weights(filename + ".h5")
+    loaded_model.compile(loss='mean_squared_error', optimizer='adam')
+
+    print("Loaded model from disk")
+    return loaded_model
+
+
 # load dataset
 series = pd.read_csv('shampoo-sales.csv', header=0, parse_dates=[0], index_col=0, squeeze=True, date_parser=parser)
 
@@ -236,11 +269,21 @@ n_epochs = 1000
 n_batch = 1
 n_neurons = 1
 
+# specifies if network should retrain with new data after making each prediction
+updateLSTM = False
+
+# specifies if network should be trained or loaded from last training
+load_model = False
+
 # prepare data
 scaler, train, test = prepare_data(series, n_test, n_lag, n_seq)
 
-# fit network
-model = fit_lstm(train, n_lag, n_seq, n_batch, n_epochs, n_neurons)
+
+if load_model:
+    model = load_network()
+else:
+    # fit network
+    model = fit_lstm(train, n_lag, n_seq, n_batch, n_epochs, n_neurons)
 
 # make forecast
 forecasts = make_forecasts(model, n_batch, train, test, n_lag, n_seq)
@@ -255,3 +298,10 @@ print('\n\nParameters:\nNeurons =', n_neurons, '\nEpochs =', n_epochs)
 evaluate_forecasts(actual, forecasts, n_lag, n_seq)
 
 plot_forecasts(series, forecasts, n_test+2)
+
+if not load_model:
+    save_model = input('Do you want to save this network? This will overwrite previously saved network\n(y/n) ')
+
+    if save_model.lower() == 'y':
+        # save network
+        save_network(model, n_neurons, n_epochs)
