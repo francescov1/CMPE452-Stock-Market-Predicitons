@@ -4,8 +4,9 @@ import numpy as np
 import pandas as pd
 import keras
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, confusion_matrix
 from matplotlib import pyplot as plt
+
 
 
 # convert time series to supervised learning problem
@@ -188,34 +189,25 @@ def inverse_transform(series, forecasts, scaler, n_test):
 def evaluate_forecasts(test, forecasts, n_lag, n_seq):
 
     for i in range(n_seq):
-        deviations = []
-        mis = 0
-
         actual = [row[i] for row in test]
         predicted = [forecast[i] for forecast in forecasts]
+        predictedDirections = list()
 
         for j, currentPrice in enumerate(actual):
-
-            dev = np.abs(currentPrice - predicted[j]) / currentPrice
-            deviations.append(dev)
-
             if j == (len(actual)-1):
                 break
 
-            predictedDirection = np.sign(predicted[j+1] - currentPrice)
-            actualDirection = np.sign(actual[j+1] - currentPrice)
+            predictedDir = np.sign(predicted[j+1] - currentPrice)
+            predictedDirections.append(predictedDir)
 
-            mis += np.abs(actualDirection-predictedDirection)/2
+        actualDirections = np.sign(np.diff(actual))
 
-        error = mis/(len(actual)-1)
+        tn, fp, fn, tp = confusion_matrix(actualDirections, predictedDirections, [-1, 1]).ravel()
+        accuracy = (tp+tn) / (tp+tn+fp+fn)
         rmse = (mean_squared_error(actual, predicted))**0.5
-        avgDev = np.mean(deviations)
-
         print('\nt+%d' % (i+1))
         print('RMSE: %f' % rmse)
-        print('Error in direction: %f' % error)
-        print('Avg deviation of price: %f' % avgDev)
-
+        print('Accuracy of direction: %f' % accuracy)
 
 # plot forecasts in context of original dataset
 # also connect persisted forecast to actual persisted value in original dataset
@@ -271,11 +263,12 @@ series = series.drop(['Date'], 1)
 
 # use SP data
 sp_series = series['S&P Open']
+sp_series = sp_series[1000:]
 
 # configure parameters
-n_lag = 1
-n_seq = 3
-n_test = 10
+n_lag = 5
+n_seq = 1
+n_test = int(len(sp_series) * 0.25)
 n_epochs = 100
 n_batch = 1
 n_neurons = 1
@@ -299,15 +292,15 @@ else:
 forecasts = make_forecasts(model, n_batch, train, test, n_lag, n_seq, updateLSTM)
 
 # inverse transform forecasts and test
-forecasts = inverse_transform(sp_series, forecasts, scaler, n_test+2)
+forecasts = inverse_transform(sp_series, forecasts, scaler,  n_test+n_seq-1)
 actual = [row[n_lag:] for row in test]
-actual = inverse_transform(sp_series, actual, scaler, n_test+2)
+actual = inverse_transform(sp_series, actual, scaler,  n_test+n_seq-1)
 
 # evaluate and plot forecasts
 print('\n\nParameters:\nNeurons =', n_neurons, '\nEpochs =', n_epochs)
 evaluate_forecasts(actual, forecasts, n_lag, n_seq)
 
-plot_forecasts(sp_series, forecasts, n_test+2)
+plot_forecasts(sp_series, forecasts,  n_test+n_seq-1)
 
 if not load_model:
     save_model = input('Do you want to save this network? This will overwrite any previously saved network with the same parameters\n(y/n) ')
@@ -315,4 +308,3 @@ if not load_model:
     if save_model.lower() == 'y':
         # save network
         save_network(model, n_neurons, n_epochs)
-
