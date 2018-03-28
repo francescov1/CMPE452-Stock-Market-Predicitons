@@ -71,7 +71,6 @@ def prepare_data(series, n_test, n_lag, n_seq):
 
 # fit an LSTM network to training data
 def fit_lstm(train, n_lag, n_seq, n_batch, n_epoch, n_neurons):
-    print("Training progress:")
     # reshape training into [samples, timesteps, features]
     X, y = train[:, 0:n_lag], train[:, n_lag:]
     X = X.reshape(X.shape[0], 1, X.shape[1])
@@ -81,12 +80,15 @@ def fit_lstm(train, n_lag, n_seq, n_batch, n_epoch, n_neurons):
     model.add(keras.layers.Dense(y.shape[1]))
     model.compile(loss='mean_squared_error', optimizer='adam')
 
+    print("Training progress:")
     # fit network
     for i in range(n_epoch):
         if np.mod(i, n_epoch/10) == 0 and i != 0:
             print('%d%% complete' % (i*100/n_epoch))
         model.fit(X, y, epochs=1, batch_size=n_batch, verbose=0, shuffle=False)
         model.reset_states()
+    print('100%% complete')
+
     return model
 
 def update_lstm(model, train, n_lag, n_batch, n_epoch):
@@ -115,8 +117,10 @@ def persistence(last_ob, n_seq):
     return [last_ob for i in range(n_seq)]
 
 # evaluate the persistence model
-def make_forecasts(model, n_batch, train, test, n_lag, n_seq):
+def make_forecasts(model, n_batch, train, test, n_lag, n_seq, updateLSTM=False):
     forecasts = list()
+    print('\nMaking predictions')
+
     for i in range(len(test)):
 
         X, y = test[i, 0:n_lag], test[i, n_lag:]
@@ -132,14 +136,17 @@ def make_forecasts(model, n_batch, train, test, n_lag, n_seq):
         forecasts.append(forecast)
 
         # add new data to retrain
-        '''
-        row = train.shape[0]
-        col = train.shape[1]
-        train = np.append(train, test[i])
-        train = train.reshape(row + 1, col)
+        if updateLSTM:
+            if np.mod(i, len(test) / 10) == 0 and i != 0:
+                print('%d%% complete' % (i * 100 / len(test)))
 
-        model = update_lstm(model, train, n_lag, n_batch, n_epoch=5)
-        '''
+            row = train.shape[0]
+            col = train.shape[1]
+            train = np.append(train, test[i])
+            train = train.reshape(row + 1, col)
+            model = update_lstm(model, train, n_lag, n_batch, n_epoch=5)
+
+    print('100%% complete')
 
     return forecasts
 
@@ -225,54 +232,71 @@ def plot_forecasts(series, forecasts, n_test):
         plt.plot(xaxis, yaxis, color='red')
     plt.show()
 
-def saveNetwork(model):
+
+# save trained network
+def save_network(model, n_neurons, n_epochs):
     # serialize model to JSON
     model_json = model.to_json()
-    with open("model.json", "w") as json_file:
+
+    filename = "model_%dneu_%depoch" % (n_neurons, n_epochs)
+
+    with open(filename + ".json", "w") as json_file:
         json_file.write(model_json)
     # serialize weights to HDF5
-    model.save_weights("model.h5")
+    model.save_weights(filename + ".h5")
     print("Saved model to disk")
 
-def loadNetwork():
+
+# load previously trained network
+def load_network(n_neurons, n_epochs):
+
+    filename = "model_%dneu_%depoch" % (n_neurons, n_epochs)
 
     # load json and create model
-    json_file = open('model.json', 'r')
+    json_file = open(filename + ".json", "r")
     loaded_model_json = json_file.read()
     json_file.close()
 
     loaded_model = keras.models.model_from_json(loaded_model_json)
     # load weights into new model
-    loaded_model.load_weights("model.h5")
-    print("Loaded model from disk")
+    loaded_model.load_weights(filename + ".h5")
+    loaded_model.compile(loss='mean_squared_error', optimizer='adam')
 
+    print("Loaded model from disk")
     return loaded_model
 
 # load dataset
-series = pd.read_csv('StockDataLaura.csv')
+series = pd.read_csv('5yr-SP-data.csv')
 series = series.drop(['Date'], 1)
-sp_series = series['S&P Closing Price']
 
+# use SP data
+sp_series = series['S&P Open']
 
-# configure
+# configure parameters
 n_lag = 1
 n_seq = 3
-n_test = 100
-n_epochs = 1000
+n_test = 10
+n_epochs = 100
 n_batch = 1
 n_neurons = 1
+
+# specifies if network should retrain with new data after making each prediction
+updateLSTM = False
+
+# specifies if network should be trained or loaded from last training
+load_model = False
 
 # prepare data
 scaler, train, test = prepare_data(sp_series, n_test, n_lag, n_seq)
 
-# fit network
-model = fit_lstm(train, n_lag, n_seq, n_batch, n_epochs, n_neurons)
+if load_model:
+    model = load_network(n_neurons, n_epochs)
+else:
+    # fit network
+    model = fit_lstm(train, n_lag, n_seq, n_batch, n_epochs, n_neurons)
 
 # make forecast
-forecasts = make_forecasts(model, n_batch, train, test, n_lag, n_seq)
-
-# save network
-saveNetwork(model)
+forecasts = make_forecasts(model, n_batch, train, test, n_lag, n_seq, updateLSTM)
 
 # inverse transform forecasts and test
 forecasts = inverse_transform(sp_series, forecasts, scaler, n_test+2)
@@ -280,13 +304,15 @@ actual = [row[n_lag:] for row in test]
 actual = inverse_transform(sp_series, actual, scaler, n_test+2)
 
 # evaluate and plot forecasts
+print('\n\nParameters:\nNeurons =', n_neurons, '\nEpochs =', n_epochs)
 evaluate_forecasts(actual, forecasts, n_lag, n_seq)
+
 plot_forecasts(sp_series, forecasts, n_test+2)
 
-'''
-    # evaluate loaded model on test data
-    loaded_model.compile(loss='binary_crossentropy', optimizer='rmsprop', metrics=['accuracy'])
-    score = loaded_model.evaluate(X, Y, verbose=0)
-    print("%s: %.2f%%" % (loaded_model.metrics_names[1], score[1] * 100))
-'''
+if not load_model:
+    save_model = input('Do you want to save this network? This will overwrite any previously saved network with the same parameters\n(y/n) ')
+
+    if save_model.lower() == 'y':
+        # save network
+        save_network(model, n_neurons, n_epochs)
 
