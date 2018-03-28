@@ -5,6 +5,7 @@ import pandas as pd
 import keras
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error
+from sklearn.metrics import confusion_matrix
 from matplotlib import pyplot as plt
 
 # load dataset
@@ -186,6 +187,9 @@ def evaluate_forecasts(test, forecasts, n_lag, n_seq):
         actual = [row[i] for row in test]
         predicted = [forecast[i] for forecast in forecasts]
 
+        actualDirections = list()
+        predictedDirections = list()
+
         for j, currentPrice in enumerate(actual):
 
             dev = np.abs(currentPrice - predicted[j]) / currentPrice
@@ -194,11 +198,16 @@ def evaluate_forecasts(test, forecasts, n_lag, n_seq):
             if j == (len(actual)-1):
                 break
 
-            predictedDirection = np.sign(predicted[j+1] - currentPrice)
-            actualDirection = np.sign(actual[j+1] - currentPrice)
+            predictedDir = np.sign(predicted[j+1] - currentPrice)
+            predictedDirections.append(predictedDir)
 
-            mis += np.abs(actualDirection-predictedDirection)/2
+            actualDir = np.sign(actual[j+1] - currentPrice)
+            actualDirections.append(actualDir)
 
+            mis += np.abs(actualDir-predictedDir)/2
+
+        tn, fp, fn, tp = confusion_matrix(actualDirections, predictedDirections, [-1, 1]).ravel()
+        accuracy = (tp+tn) / (tp+tn+fp+fn)
         error = mis/(len(actual)-1)
         rmse = (mean_squared_error(actual, predicted))**0.5
         avgDev = np.mean(deviations)
@@ -207,6 +216,7 @@ def evaluate_forecasts(test, forecasts, n_lag, n_seq):
         print('RMSE: %f' % rmse)
         print('Error in direction: %f' % error)
         print('Avg deviation of price: %f' % avgDev)
+        print('Accuracy of direction: %f' % accuracy)
 
 
 # plot forecasts in context of original dataset
@@ -264,7 +274,7 @@ series = pd.read_csv('shampoo-sales.csv', header=0, parse_dates=[0], index_col=0
 # configure
 n_lag = 1
 n_seq = 3
-n_test = 10
+n_test = int(len(series) * 0.25)
 n_epochs = 1000
 n_batch = 1
 n_neurons = 1
@@ -273,14 +283,14 @@ n_neurons = 1
 updateLSTM = False
 
 # specifies if network should be trained or loaded from last training
-load_model = False
+load_model = True
 
 # prepare data
 scaler, train, test = prepare_data(series, n_test, n_lag, n_seq)
 
 
 if load_model:
-    model = load_network()
+    model = load_network(n_neurons, n_epochs)
 else:
     # fit network
     model = fit_lstm(train, n_lag, n_seq, n_batch, n_epochs, n_neurons)
@@ -289,19 +299,19 @@ else:
 forecasts = make_forecasts(model, n_batch, train, test, n_lag, n_seq)
 
 # inverse transform forecasts and test
-forecasts = inverse_transform(series, forecasts, scaler, n_test+2)
+forecasts = inverse_transform(series, forecasts, scaler,  n_test+n_seq-1)
 actual = [row[n_lag:] for row in test]
-actual = inverse_transform(series, actual, scaler, n_test+2)
+actual = inverse_transform(series, actual, scaler,  n_test+n_seq-1)
 
 # evaluate and plot forecasts
 print('\n\nParameters:\nNeurons =', n_neurons, '\nEpochs =', n_epochs)
 evaluate_forecasts(actual, forecasts, n_lag, n_seq)
 
-plot_forecasts(series, forecasts, n_test+2)
+plot_forecasts(series, forecasts,  n_test+n_seq-1)
 
 if not load_model:
     save_model = input('Do you want to save this network? This will overwrite previously saved network\n(y/n) ')
 
-    if save_model.lower() == 'y':
+    if save_model.lower(n_neurons, n_epochs) == 'y':
         # save network
         save_network(model, n_neurons, n_epochs)
