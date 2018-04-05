@@ -4,5 +4,6 @@ mastery_multistep/data_stocks.csv
 masteryUni/*
 shampoo_sales/*
 statworx/*
-final_model/DJIA_table.csv
-final_model/dija_networks/*
+time_series_prediction_francesco/DJIA_table.csv
+time_series_prediction_francesco/dija_networks/*
+time_series_prediction_francesco/network-hugh.py
