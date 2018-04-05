@@ -7,3 +7,6 @@ statworx/*
 time_series_prediction_francesco/DJIA_table.csv
 time_series_prediction_francesco/dija_networks/*
 time_series_prediction_francesco/network-hugh.py
+.DS_Store
+*.pyc
+*.swp
