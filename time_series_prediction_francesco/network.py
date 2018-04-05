@@ -7,8 +7,10 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error, confusion_matrix
 from matplotlib import pyplot as plt
 
+# losses from training
 losses = []
 
+# callback used to append losses during training
 class LossHistory(keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs={}):
         losses.append(logs.get('loss'))
@@ -42,7 +44,7 @@ def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
     return agg
 
 
-# create a differenced series
+# create a differenced series (each data point is changed from a price to a change in price)
 def difference(dataset, interval=1):
     diff = list()
     for i in range(interval, len(dataset)):
@@ -53,7 +55,6 @@ def difference(dataset, interval=1):
 
 # transform series into train and test sets for supervised learning
 def prepare_data(series, n_test, n_lag, n_seq):
-    # extract raw vals
     raw_values = series.values
 
     # transform data to be stationary
@@ -77,6 +78,7 @@ def prepare_data(series, n_test, n_lag, n_seq):
 
 # fit an LSTM network to training data
 def fit_lstm(train, n_lag, n_seq, n_batch, n_epoch, n_neurons):
+
     # reshape training into [samples, timesteps, features]
     X, y = train[:, 0:n_lag], train[:, n_lag:]
     X = X.reshape(X.shape[0], 1, X.shape[1])
@@ -89,22 +91,25 @@ def fit_lstm(train, n_lag, n_seq, n_batch, n_epoch, n_neurons):
     history = LossHistory()
 
     print("Training progress:")
-    #fit network
+
+    # fit network, manually loop through epochs to control statefulness of model
     for i in range(n_epoch):
         if np.mod(i, n_epoch/10) == 0 and i != 0:
             print('%d%% complete' % (i*100/n_epoch))
         model.fit(X, y, epochs=1, batch_size=n_batch, verbose=0, shuffle=False, callbacks=[history])
         model.reset_states()
+
     print('Done')
     print('Losses =', losses)
     return model
 
 def update_lstm(model, train, n_lag, n_batch, n_epoch):
+
     # reshape training into [samples, timesteps, features]
     X, y = train[:, 0:n_lag], train[:, n_lag:]
     X = X.reshape(X.shape[0], 1, X.shape[1])
 
-    # fit network
+    # fit network, manually loop through epochs to control statefulness of model
     for i in range(n_epoch):
         model.fit(X, y, epochs=1, batch_size=n_batch, verbose=0, shuffle=False)
         model.reset_states()
@@ -126,7 +131,6 @@ def make_forecasts(model, n_batch, train, test, n_lag, n_seq, updateLSTM=False):
     print('\nMaking predictions')
 
     for i in range(len(test)):
-
         X, y = test[i, 0:n_lag], test[i, n_lag:]
 
         # LSTM forecast
@@ -139,7 +143,6 @@ def make_forecasts(model, n_batch, train, test, n_lag, n_seq, updateLSTM=False):
         if updateLSTM:
             if np.mod(i, len(test) / 10) == 0 and i != 0:
                 print('%d%% complete' % (i * 100 / len(test)))
-
             row = train.shape[0]
             col = train.shape[1]
             train = np.append(train, test[i])
@@ -147,7 +150,6 @@ def make_forecasts(model, n_batch, train, test, n_lag, n_seq, updateLSTM=False):
             model = update_lstm(model, train, n_lag, n_batch, n_epoch=1)
 
     print('Done')
-
     return forecasts
 
 
@@ -208,6 +210,7 @@ def evaluate_forecasts(test, forecasts, n_lag, n_seq):
         print('RMSE: %f' % rmse)
         print('Accuracy of direction: %f' % accuracy)
 
+
 # plot forecasts in context of original dataset
 # also connect persisted forecast to actual persisted value in original dataset
 def plot_forecasts(series, forecasts, n_test):
@@ -224,15 +227,13 @@ def plot_forecasts(series, forecasts, n_test):
         plt.plot(xaxis, yaxis, color='red')
     plt.xlabel('Data point')
     plt.ylabel('Price')
-    plt.show()
+
 
 # plot loss of training
 def plot_loss():
-    plt.figure()
     plt.plot(losses)
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
-    plt.show()
 
 
 # save trained network
@@ -240,7 +241,7 @@ def save_network(model, n_neurons, n_epochs):
 
     # serialize model to JSON
     model_json = model.to_json()
-    filename = "sp_networks/model_%dneu_%depoch" % (n_neurons, n_epochs)
+    filename = "saved_networks/model_%dneu_%depoch" % (n_neurons, n_epochs)
 
     with open(filename + ".json", "w") as json_file:
         json_file.write(model_json)
@@ -252,8 +253,7 @@ def save_network(model, n_neurons, n_epochs):
 # load previously trained network
 def load_network(n_neurons, n_epochs):
 
-    filename = "sp_networks/model_%dneu_%depoch" % (n_neurons, n_epochs)
-    #filename = "dija_networks/model_%dneu_%depoch" % (n_neurons, n_epochs)
+    filename = "saved_networks/model_%dneu_%depoch" % (n_neurons, n_epochs)
 
     # load json and create model
     json_file = open(filename + ".json", "r")
@@ -270,27 +270,41 @@ def load_network(n_neurons, n_epochs):
 
 
 
+# configure parameters
+
+# number of previous timesteps (in his case the timestep is one day) to
+# use in making predictions (t-n_lag, t-n_lag+1, ..., t-2, t-1)
+n_lag = 3
+
+# number of timesteps to predict program will predict the next n_seq
+# prices from each testing timestep (t, t+1, ..., t+n_seq)
+n_seq = 1
+
+# number of epochs to train network or used to train loaded network
+n_epochs = 4
+
+# batch size
+n_batch = 1
+
+# number of LSTM neurons in model
+n_neurons = 1
+
+# specifies if network should retrain with new data after making each prediction (greatly slows down forecasts)
+updateLSTM = False
+
+# specifies if network should be trained or loaded from last training
+load_model = True
+
 
 # load dataset
 series = pd.read_csv('5yr-SP-data.csv')
-series = series.drop(['Date'], 1)
-
 sp_series = series['S&P Open']
-sp_series = sp_series[1000:]
 
-# configure parameters
-n_lag = 3
-n_seq = 1
+# use only last ~500 data points (1259 total)
+sp_series = sp_series[800:]
+
+# number of timesteps to test model
 n_test = int(len(sp_series) * 0.20)
-n_epochs = 20
-n_batch = 1
-n_neurons = 1
-
-# specifies if network should retrain with new data after making each prediction
-updateLSTM = True
-
-# specifies if network should be trained or loaded from last training
-load_model = False
 
 # prepare data
 scaler, train, test = prepare_data(sp_series, n_test, n_lag, n_seq)
@@ -310,14 +324,23 @@ actual = [row[n_lag:] for row in test]
 actual = inverse_transform(sp_series, actual, scaler,  n_test+n_seq-1)
 
 # evaluate and plot forecasts
-print('\n\nParameters:\nNeurons =', n_neurons, '\nLag =', n_lag, '\nEpochs =', n_epochs)
+print('\nParameters:\nNeurons =', n_neurons, '\nLag =', n_lag, '\nEpochs =', n_epochs)
 evaluate_forecasts(actual, forecasts, n_lag, n_seq)
-plot_forecasts(sp_series, forecasts,  n_test+n_seq-1)
-plot_loss()
+
+plt.figure(1)
+
+# if model was loaded, just plot forecast, else plot loss as well
+if load_model:
+    plot_forecasts(sp_series, forecasts, n_test + n_seq - 1)
+else:
+    plt.subplot(211)
+    plot_forecasts(sp_series, forecasts,  n_test+n_seq-1)
+    plt.subplot(212)
+    plot_loss()
+plt.show()
 
 if not load_model:
     save_model = input('Do you want to save this network? This will overwrite any previously saved network with the same parameters\n(y/n) ')
-
     if save_model.lower() == 'y':
         # save network
         save_network(model, n_neurons, n_epochs)
