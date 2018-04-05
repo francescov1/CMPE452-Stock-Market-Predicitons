@@ -1,5 +1,4 @@
 Running the Code
-
 - <i>network.py</i> contains all the required code
 - <i>saved_networks</i> folder contains files for previously trained networks. Any network that is saved will be saved here
 - <i>5yr-SP-data.csv</i> contains all the required stock price data
