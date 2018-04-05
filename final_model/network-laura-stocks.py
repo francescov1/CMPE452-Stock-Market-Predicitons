@@ -95,11 +95,8 @@ def fit_lstm(train, n_lag, n_seq, n_batch, n_epoch, n_neurons):
             print('%d%% complete' % (i*100/n_epoch))
         model.fit(X, y, epochs=1, batch_size=n_batch, verbose=0, shuffle=False, callbacks=[history])
         model.reset_states()
-
     print('Done')
-
     print('Losses =', losses)
-
     return model
 
 def update_lstm(model, train, n_lag, n_batch, n_epoch):
@@ -123,11 +120,7 @@ def forecast_lstm(model, X, n_batch):
     # convert to array
     return [x for x in forecast[0, :]]
 
-# make a persistence forecast
-def persistence(last_ob, n_seq):
-    return [last_ob for i in range(n_seq)]
-
-# evaluate the persistence model
+# make price prediction
 def make_forecasts(model, n_batch, train, test, n_lag, n_seq, updateLSTM=False):
     forecasts = list()
     print('\nMaking predictions')
@@ -135,10 +128,6 @@ def make_forecasts(model, n_batch, train, test, n_lag, n_seq, updateLSTM=False):
     for i in range(len(test)):
 
         X, y = test[i, 0:n_lag], test[i, n_lag:]
-
-        # make forecast
-        # presistant forecast (simple, take last value and persist, use to get baseline rmse)
-        #forecast = persistence(X[-1], n_seq)
 
         # LSTM forecast
         forecast = forecast_lstm(model, X, n_batch)
@@ -222,6 +211,7 @@ def evaluate_forecasts(test, forecasts, n_lag, n_seq):
 # plot forecasts in context of original dataset
 # also connect persisted forecast to actual persisted value in original dataset
 def plot_forecasts(series, forecasts, n_test):
+
     # plot entire dataset in blue
     plt.plot(series.values)
 
@@ -247,11 +237,10 @@ def plot_loss():
 
 # save trained network
 def save_network(model, n_neurons, n_epochs):
+
     # serialize model to JSON
     model_json = model.to_json()
-
     filename = "sp_networks/model_%dneu_%depoch" % (n_neurons, n_epochs)
-    #filename = "dija_networks/model_%dneu_%depoch" % (n_neurons, n_epochs)
 
     with open(filename + ".json", "w") as json_file:
         json_file.write(model_json)
@@ -284,15 +273,10 @@ def load_network(n_neurons, n_epochs):
 
 # load dataset
 series = pd.read_csv('5yr-SP-data.csv')
-#series = pd.read_csv('DJIA_table.csv')
 series = series.drop(['Date'], 1)
 
-# use SP data
-#sp_series = series['Close']
 sp_series = series['S&P Open']
-# sp_series = sp_series[::-1]
-#sp_series = sp_series[1200:1500]
-sp_series = sp_series[800:]
+sp_series = sp_series[1000:]
 
 # configure parameters
 n_lag = 3
@@ -300,7 +284,7 @@ n_seq = 1
 n_test = int(len(sp_series) * 0.20)
 n_epochs = 20
 n_batch = 1
-n_neurons = 3
+n_neurons = 1
 
 # specifies if network should retrain with new data after making each prediction
 updateLSTM = True

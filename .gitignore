@@ -4,3 +4,5 @@ mastery_multistep/data_stocks.csv
 masteryUni/*
 shampoo_sales/*
 statworx/*
+final_model/DJIA_table.csv
+final_model/dija_networks/*
