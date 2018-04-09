@@ -141,8 +141,8 @@ def make_forecasts(model, n_batch, train, test, n_lag, n_seq, updateLSTM=False):
 
         # add new data to retrain
         if updateLSTM:
-            if np.mod(i, len(test) / 10) == 0 and i != 0:
-                print('%d%% complete' % (i * 100 / len(test)))
+            if np.mod(i, round(len(test)/10)) == 0 and i != 0:
+                print('%d%% complete' % round(i * 100 / len(test)))
             row = train.shape[0]
             col = train.shape[1]
             train = np.append(train, test[i])
